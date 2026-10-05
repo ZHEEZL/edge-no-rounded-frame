@@ -30,12 +30,22 @@ powershell -ExecutionPolicy Bypass -File .\EdgeNoRoundedFrame.ps1 -Undo
 Or just double-click `Run.cmd`.
 
 **After applying: close Edge completely** (Task Manager: no `msedge.exe` left)
-and start it again from a normal shortcut. A running Edge process ignores the
-switch for new windows — that is exactly why this script also disables
-"Startup boost" and the background mode.
+and start it again from a normal shortcut — a running Edge process ignores the
+switch for new windows.
 
-Extra options: `-NoElevate`, `-SkipPolicies`, `-SkipProtocolHandlers`,
-`-Quiet`, `-BackupDir <path>`.
+Then flip two switches once, by hand, in `edge://settings/system`:
+
+* **Startup boost** — off
+* **Continue running background extensions and apps when Microsoft Edge is closed** — off
+
+Why: "Startup boost" pre-launches Edge at sign-in *without* the switch, and the
+window you open later is handed to that process, so the frame comes back. The
+script deliberately does **not** force this with a policy: Edge would then report
+itself as "managed by your organization" and lock both switches. Edge 154 keeps
+them in an encrypted preference store, so they cannot be set safely from a script.
+
+Extra options: `-NoElevate`, `-UsePolicies` (opt-in, see below), `-SkipPolicies`
+(default), `-SkipProtocolHandlers`, `-Quiet`, `-BackupDir <path>`.
 
 ## How it works
 
@@ -53,7 +63,13 @@ The script writes that command-line switch into everything that can start Edge:
 |---|---|
 | Start Menu (machine + user), Desktop, Public Desktop, Quick Launch, taskbar pin | normal browser starts |
 | `microsoft-edge:`, `MSEdgeHTM`, `MSEdgePDF`, `MSEdgeMHT` protocol/file handlers (`HKCU\Software\Classes`) | links opened from other applications |
-| `StartupBoostEnabled = 0`, `BackgroundModeEnabled = 0` (`HKLM\SOFTWARE\Policies\Microsoft\Edge`) | otherwise a pre-launched background Edge process accepts the new window and the switch is silently ignored |
+
+Optionally, only with `-UsePolicies`, it also writes `StartupBoostEnabled = 0` and
+`BackgroundModeEnabled = 0` under `HKLM\SOFTWARE\Policies\Microsoft\Edge`. That
+keeps the two switches off for good, but Edge then calls itself "managed by your
+organization" and greys them out — which is why it is **off by default**. Remove
+it again with `-UsePolicies -Undo` (the script only deletes that key if it holds
+nothing else).
 
 Every change is recorded in `%LOCALAPPDATA%\EdgeNoRoundedFrame\backup.json`
 together with copies of the original shortcuts and exported `.reg` files, so
@@ -110,9 +126,9 @@ manifest is kept so you can finish from an elevated PowerShell.
 * Edge updates can recreate the Start Menu shortcut without the switch; just run
   the script again (it is idempotent). The `HKCU\Software\Classes` overrides
   survive updates.
-* Setting the two policies makes Edge show "managed by your organization" in
-  `edge://policy`. Use `-SkipPolicies` if you do not want that, but then the
-  switch may be ignored while a background Edge process is alive.
+* No policy is written by default, so Edge keeps reporting itself as unmanaged.
+  With `-UsePolicies` it will show "managed by your organization" and lock the two
+  switches in `edge://settings/system`; `-Undo` removes the policy again.
 * `-Undo` needs the same rights as the patch (admin, for the machine-wide parts).
 
 ## Кратко по-русски
@@ -121,9 +137,12 @@ manifest is kept so you can finish from an elevated PowerShell.
 Внутренняя фича `msForceNoRoundedCornerAndMargin` найдена в `msedge.dll` (сборка
 154): старый флаг `edge-rounded-containers` из браузера вырезан, а эта — нет.
 Скрипт дописывает `--enable-features=msForceNoRoundedCornerAndMargin` в ярлыки и
-обработчики ссылок, выключает Startup boost и фоновый режим, делает бэкап и
-умеет откатываться (`-Undo`) и проверяться (`-Test`). После применения Edge надо
-закрыть полностью и запустить заново.
+обработчики ссылок, делает бэкап и умеет откатываться (`-Undo`) и проверяться
+(`-Test`). После применения Edge надо закрыть полностью и запустить заново, а в
+`edge://settings/system` один раз выключить **Startup boost** и «Continue running
+background extensions and apps…» — иначе фоновый Edge перехватит запуск. Политики
+по умолчанию **не** пишутся (из-за них Edge считает себя управляемым); для этого
+есть явный флаг `-UsePolicies`.
 
 ## License
 

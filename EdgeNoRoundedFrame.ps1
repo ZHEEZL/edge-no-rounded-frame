@@ -32,7 +32,13 @@
     profile (no changes to your shortcuts or profile). Prints the pixel delta.
 
 .PARAMETER SkipPolicies
-    Do not touch the Startup boost / background mode policies.
+    Never write policies (this is the default; accepted for compatibility).
+
+.PARAMETER UsePolicies
+    Also set StartupBoostEnabled=0 / BackgroundModeEnabled=0 as Edge policies.
+    WARNING: Edge then reports itself as "managed by your organization" and locks
+    those two switches in edge://settings/system. Prefer switching them off by hand
+    in edge://settings/system, as the script's hint tells you to.
 
 .PARAMETER SkipProtocolHandlers
     Do not touch the URL / file protocol handlers.
@@ -69,6 +75,7 @@ param(
     [switch]$Undo,
     [switch]$Test,
     [switch]$SkipPolicies,
+    [switch]$UsePolicies,
     [switch]$SkipProtocolHandlers,
     [switch]$NoElevate,
     [switch]$Quiet,
@@ -538,12 +545,39 @@ window.addEventListener('load',r);setInterval(r,500);r();
 
 # -------------------------------------------------------------------- main --
 
+function Get-PolicyValue {
+    param([string]$Root, [string]$Name)
+    try { return (Get-ItemProperty -Path $Root -Name $Name -ErrorAction Stop).$Name } catch { return $null }
+}
+
+function Show-SystemSettingsHint {
+    $found = @()
+    foreach ($root in @('HKCU:\Software\Policies\Microsoft\Edge', 'HKLM:\SOFTWARE\Policies\Microsoft\Edge')) {
+        foreach ($name in $Script:PolicyNames) {
+            $v = Get-PolicyValue -Root $root -Name $name
+            if ($null -ne $v) { $found += "$name = $v in $root" }
+        }
+    }
+    Say ''
+    Say 'Startup boost / background mode'
+    foreach ($f in $found) {
+        SayWarn "policy is set: $f"
+        SayWarn 'Edge will report itself as "managed by your organization" and lock that switch.'
+    }
+    SayNote 'A running Edge ignores the switch, and "Startup boost" pre-launches Edge at sign-in without'
+    SayNote 'it - so both switches should be off. Edge 154 keeps them in an encrypted preference store,'
+    SayNote 'which means they cannot be set safely from a script. Flip them once by hand:'
+    SayNote '    edge://settings/system  ->  Startup boost = off'
+    SayNote '                            ->  "Continue running background extensions and apps when Microsoft Edge is closed" = off'
+    SayNote 'No policy is written by default, so Edge will not call itself managed.'
+}
+
 function Invoke-Patch {
     param([string]$Scope)
     Say "[$Scope scope]"
     $null = Invoke-ShortcutPatch -Scope $Scope
     if ($Scope -eq 'User' -and -not $SkipProtocolHandlers) { $null = Invoke-ProtocolPatch }
-    if (-not $SkipPolicies) { $null = Invoke-PolicyPatch -Scope $Scope }
+    if ($UsePolicies -and -not $SkipPolicies) { $null = Invoke-PolicyPatch -Scope $Scope }
 }
 
 function Invoke-Undo {
@@ -601,6 +635,7 @@ if (-not $isAdmin -and -not $NoElevate) {
     $argList = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$PSCommandPath`"", '-MachineOnly', '-BackupDir', "`"$Script:BackupDir`"")
     if ($Undo) { $argList += '-Undo' }
     if ($SkipPolicies) { $argList += '-SkipPolicies' }
+    if ($UsePolicies) { $argList += '-UsePolicies' }
     try {
         $elevated = Start-Process -FilePath $ps -ArgumentList $argList -Verb RunAs -Wait -PassThru -ErrorAction Stop
         if (-not $elevated -or $null -eq $elevated.ExitCode -or $elevated.ExitCode -eq 0) { $machineHandled = $true }
@@ -627,6 +662,8 @@ if ($Undo) {
         SayWarn "Edge is running ($running processes). Close it completely and start it again from a normal shortcut,"
         SayWarn 'otherwise the already running process keeps the frame.'
     }
+    Show-SystemSettingsHint
+    Say ''
     Say 'Done. Verify with:  .\EdgeNoRoundedFrame.ps1 -Test'
     Say 'Revert with:        .\EdgeNoRoundedFrame.ps1 -Undo'
 }
